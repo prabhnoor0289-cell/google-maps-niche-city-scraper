@@ -1,0 +1,15 @@
+{
+  "name": "google-maps-niche-city-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Scrapes Google Maps listings for a given niche + US city",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.2.0",
+    "crawlee": "^3.9.0",
+    "playwright": "^1.44.0"
+  }
+}
