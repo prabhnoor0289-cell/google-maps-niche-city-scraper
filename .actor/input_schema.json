@@ -1,0 +1,30 @@
+{
+  "title": "Google Maps Niche + City Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "niche": {
+      "title": "Niche / Business Type",
+      "type": "string",
+      "description": "e.g. 'plumber', 'dentist', 'coffee shop'",
+      "editor": "textfield",
+      "prefill": "plumber"
+    },
+    "city": {
+      "title": "City, State",
+      "type": "string",
+      "description": "e.g. 'Austin, TX'",
+      "editor": "textfield",
+      "prefill": "Austin, TX"
+    },
+    "maxResults": {
+      "title": "Max results",
+      "type": "integer",
+      "description": "Max number of listings to scrape",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 500
+    }
+  },
+  "required": ["niche", "city"]
+}
