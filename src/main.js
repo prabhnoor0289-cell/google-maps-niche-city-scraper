@@ -11,16 +11,19 @@ if (!niche || !city) {
 }
 
 const searchQuery = `${niche} in ${city}`;
-const startUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}`;
+const startUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}?hl=en`;
 
 log.info(`Starting scrape for: "${searchQuery}"`);
 
-let resultsCount = 0;
+const proxyConfiguration = await Actor.createProxyConfiguration();
+
+let savedCount = 0;
 
 const crawler = new PlaywrightCrawler({
+    proxyConfiguration,
     headless: true,
     maxRequestsPerCrawl: 1,
-    requestHandlerTimeoutSecs: 180,
+    requestHandlerTimeoutSecs: 240,
     launchContext: {
         launchOptions: {
             args: ['--disable-blink-features=AutomationControlled'],
@@ -28,17 +31,47 @@ const crawler = new PlaywrightCrawler({
     },
     async requestHandler({ page, request }) {
         log.info(`Loading ${request.url}`);
-        await page.waitForSelector('div[role="feed"]', { timeout: 30000 }).catch(() => {
-            log.warning('Feed selector not found — Google Maps layout may have changed.');
-        });
+        await page.waitForLoadState('domcontentloaded');
+
+        try {
+            const consentSelectors = [
+                'button:has-text("Accept all")',
+                'button:has-text("I agree")',
+                'form[action*="consent"] button',
+            ];
+            for (const sel of consentSelectors) {
+                const btn = await page.$(sel);
+                if (btn) {
+                    await btn.click();
+                    log.info(`Dismissed consent popup using selector: ${sel}`);
+                    await page.waitForTimeout(2000);
+                    break;
+                }
+            }
+        } catch (e) {
+            log.info('No consent popup detected or already dismissed.');
+        }
 
         const feedSelector = 'div[role="feed"]';
+        const feedAppeared = await page
+            .waitForSelector(feedSelector, { timeout: 30000 })
+            .then(() => true)
+            .catch(() => false);
+
+        if (!feedAppeared) {
+            log.warning('Feed selector not found. Saving a debug screenshot for inspection.');
+            const screenshotBuffer = await page.screenshot({ fullPage: true });
+            await Actor.setValue('DEBUG_SCREENSHOT', screenshotBuffer, { contentType: 'image/png' });
+            return;
+        }
+
         let previousHeight = 0;
         let sameHeightCount = 0;
+        let cardCount = 0;
 
-        while (resultsCount < maxResults && sameHeightCount < 4) {
+        while (cardCount < maxResults && sameHeightCount < 4) {
             const cards = await page.$$(`${feedSelector} div[role="article"]`);
-            resultsCount = cards.length;
+            cardCount = cards.length;
 
             const newHeight = await page.evaluate((sel) => {
                 const el = document.querySelector(sel);
@@ -60,13 +93,18 @@ const crawler = new PlaywrightCrawler({
             await page.waitForTimeout(1500);
         }
 
-        const cards = await page.$$('div[role="feed"] div[role="article"]');
-        const limit = Math.min(cards.length, maxResults);
+        log.info(`Found ${cardCount} listing cards after scrolling.`);
+
+        const limit = Math.min(cardCount, maxResults);
 
         for (let i = 0; i < limit; i++) {
             try {
-                const card = cards[i];
-                await card.click();
+                const freshCards = await page.$$(`${feedSelector} div[role="article"]`);
+                if (i >= freshCards.length) break;
+
+                await freshCards[i].scrollIntoViewIfNeeded();
+                await page.waitForTimeout(300);
+                await freshCards[i].click({ timeout: 10000 });
                 await page.waitForTimeout(2000);
 
                 const data = await page.evaluate(() => {
@@ -108,10 +146,11 @@ const crawler = new PlaywrightCrawler({
                         googleMapsUrl: page.url(),
                         scrapedAt: new Date().toISOString(),
                     });
-                    log.info(`Saved: ${data.name}`);
+                    savedCount++;
+                    log.info(`Saved (${savedCount}): ${data.name}`);
                 }
             } catch (err) {
-                log.warning(`Failed to extract a listing: ${err.message}`);
+                log.warning(`Failed to extract listing #${i}: ${err.message}`);
             }
         }
     },
@@ -122,6 +161,6 @@ const crawler = new PlaywrightCrawler({
 
 await crawler.run([startUrl]);
 
-log.info(`Done. Scraped ${resultsCount} listings for "${searchQuery}".`);
+log.info(`Done. Saved ${savedCount} listings for "${searchQuery}" to the dataset.`);
 
 await Actor.exit();
